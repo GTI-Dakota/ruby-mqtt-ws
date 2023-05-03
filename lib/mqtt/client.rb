@@ -152,12 +152,7 @@ module MQTT
           puts "DEBUG - MQTT detected"
         when %r{^mqtts?://}
           attributes.merge!(parse_uri(args[0]))
-        when %r{^ws://}
-          puts "DEBUG - Websocket detected"
-          @websocket = true
-          @ws_url = args[0]
-          attributes.merge!(parse_uri(args[0]))
-        when %r{^wss://} # Merge with above later
+        when %r{^wss?://}
           puts "DEBUG - Websocket detected"
           @websocket = true
           @ws_url = args[0]
