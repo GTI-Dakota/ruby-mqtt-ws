@@ -2,6 +2,8 @@ autoload :OpenSSL, 'openssl'
 autoload :URI, 'uri'
 autoload :CGI, 'cgi'
 
+require 'websocket' # take me out later
+
 # Client class for talking to an MQTT server
 module MQTT
   class Client
@@ -57,6 +59,15 @@ module MQTT
     # Last ping response time
     attr_reader :last_ping_response
 
+    # Are we using websocket upgrade?
+    attr_accessor :websocket
+
+    # Websocket headers
+    attr_accessor :upgrade_headers
+
+    # Websocket URL
+    attr_accessor :ws_url
+
     # Timeout between select polls (in seconds)
     SELECT_TIMEOUT = 0.5
 
@@ -75,7 +86,8 @@ module MQTT
       :will_payload => nil,
       :will_qos => 0,
       :will_retain => false,
-      :ssl => false
+      :ssl => false,
+      :upgrade_headers => nil
     }
 
     # Create and connect a new MQTT Client
@@ -135,10 +147,23 @@ module MQTT
       if args.length >= 1
         case args[0]
         when URI
+          puts "DEBUG - URI detected"
           attributes.merge!(parse_uri(args[0]))
+          puts "DEBUG - MQTT detected"
         when %r{^mqtts?://}
           attributes.merge!(parse_uri(args[0]))
+        when %r{^ws://}
+          puts "DEBUG - Websocket detected"
+          @websocket = true
+          @ws_url = args[0]
+          attributes.merge!(parse_uri(args[0]))
+        when %r{^wss://} # Merge with above later
+          puts "DEBUG - Websocket detected"
+          @websocket = true
+          @ws_url = args[0]
+          attributes.merge!(parse_uri(args[0]))
         else
+          puts "DEBUG - Else case"
           attributes[:host] = args[0]
         end
       end
@@ -162,6 +187,10 @@ module MQTT
       if @ssl
         require 'openssl'
         require 'mqtt/openssl_fix'
+      end
+
+      if @websocket
+        require 'websocket'
       end
 
       # Initialise private instance variables
@@ -219,6 +248,10 @@ module MQTT
       self.will_qos = qos
     end
 
+    def websocket(option=true)
+      @websocket = option
+    end
+
     # Connect to the MQTT server
     # If a block is given, then yield to that block and then disconnect again.
     def connect(clientid = nil)
@@ -235,6 +268,8 @@ module MQTT
 
       unless connected?
         # Create network socket
+        puts @host
+        puts @port
         tcp_socket = TCPSocket.new(@host, @port)
 
         if @ssl
@@ -250,6 +285,14 @@ module MQTT
           @socket.connect
         else
           @socket = tcp_socket
+        end
+
+       
+        if @websocket
+          # If using Websocket, need to establish handshake and upgrade
+          websocket_upgrade
+          # Establish frame client
+          @incoming_websocket_frame = WebSocket::Frame::Incoming::Client.new
         end
 
         # Construct a connect packet
@@ -286,6 +329,35 @@ module MQTT
         yield(self)
       ensure
         disconnect
+      end
+    end
+
+    # Handle a Websocket udgrade from TCP
+    # this deals with the initial handshake and then returns for MQTT
+    def websocket_upgrade
+      # Create the handshake client
+      puts "DEBUG - Beginning handshake"
+      @handshake = ::WebSocket::Handshake::Client.new :url => @ws_url, :headers => @upgrade_headers
+
+      puts "#{@handshake.headers}"
+      puts "#{@handshake.to_s}"
+
+      # use the timeout to attempt to handshake w/ ws server
+      @socket.write @handshake.to_s
+
+      Timeout.timeout(@ack_timeout) do
+        loop do # go until either the timeout is hit or we finish our handshake
+          result = IO.select([@socket], [], [], SELECT_TIMEOUT)
+          unless result.nil?
+            char = @socket.getc
+            @handshake << char
+            if @handshake.finished? # we got our handshake
+              # raise ProtocolException, "Handshake error: #{@handshake.error}" unless @handshake.valid?
+              puts "DEBUG - Handshake complete. Version #{@handshake.version}:\n#{@handshake.to_s}"
+              return
+            end
+          end
+        end
       end
     end
 
@@ -468,8 +540,10 @@ module MQTT
       handle_timeouts
       unless result.nil?
         # Yes - read in the packet
-        packet = MQTT::Packet.read(@socket)
+        packet = read_packet()
+
         handle_packet packet
+
       end
       keep_alive!
     # Pass exceptions up to parent thread
@@ -546,7 +620,8 @@ module MQTT
     # Read and check a connection acknowledgement packet
     def receive_connack
       Timeout.timeout(@ack_timeout) do
-        packet = MQTT::Packet.read(@socket)
+
+        packet = read_packet()
         if packet.class != MQTT::Packet::Connack
           raise MQTT::ProtocolException, "Response wasn't a connection acknowledgement: #{packet.class}"
         end
@@ -561,10 +636,49 @@ module MQTT
       end
     end
 
+    def read_packet
+      unless @websocket
+        return MQTT::Packet.read(@socket)
+      else
+        # read initial char
+        iter = 0
+        msg = ""
+        loop do
+          byte = @socket.getc
+          if byte.nil?
+            puts "DEBUG - Message: #{msg}"
+          end
+          if byte.nil?
+            raise ProtocolException, "Websocket Error: #{@incoming_websocket_frame.error}" if @incoming_websocket_frame.error?
+            raise ProtocolException, 'Failed to read byte from socket' 
+          end
+          msg += "#{byte}"
+          # puts "DEBUG - Byte: #{byte}"
+          @incoming_websocket_frame << byte
+          payload = @incoming_websocket_frame.next
+          # if @incoming_websocket_frame.error?
+          #   puts "#{@incoming_websocket_frame.error}"
+          # end
+          if payload
+            packet = MQTT::Packet.parse(payload)
+            return packet
+          end
+          # puts "DEBUG - Iterations: #{iter}"
+          iter += 1
+        end
+      end
+    end
+
     # Send a packet to server
     def send_packet(data)
       # Raise exception if we aren't connected
       raise MQTT::NotConnectedException unless connected?
+
+      if @websocket
+        # puts "DEBUG - Data before frame: #{data}"
+        data = WebSocket::Frame::Outgoing::Client.new(:data => data, :type => :text, :version => @handshake.version)
+        # puts "DEBUG - Data after frame: #{data}"
+      end
 
       # Only allow one thread to write to socket at a time
       @write_semaphore.synchronize do
@@ -574,12 +688,12 @@ module MQTT
 
     def parse_uri(uri)
       uri = URI.parse(uri) unless uri.is_a?(URI)
-      if uri.scheme == 'mqtt'
+      if uri.scheme == 'mqtt' || uri.scheme == 'ws'
         ssl = false
-      elsif uri.scheme == 'mqtts'
+      elsif uri.scheme == 'mqtts' || uri.scheme == 'wss'
         ssl = true
       else
-        raise 'Only the mqtt:// and mqtts:// schemes are supported'
+        raise 'Only mqtt://, mqtts://, ws://, and wss:// schemes are supported'
       end
 
       {
