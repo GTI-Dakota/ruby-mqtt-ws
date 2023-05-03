@@ -1,6 +1,12 @@
 Ruby MQTT NEWS
 ==============
 
+Ruby MQTT Version ?.?.? (2023-XX-XX)
+------------------------------------
+
+* Added websocket support for AWS IOT MQTT Servers
+
+
 Ruby MQTT Version 0.5.0 (2017-04-16)
 ------------------------------------
 
