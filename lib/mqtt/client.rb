@@ -62,7 +62,7 @@ module MQTT
     # Are we using websocket upgrade?
     attr_accessor :websocket
 
-    # Websocket headers
+    # (Hash w/ key symbols) Websocket headers to customize the HTTP upgrade request
     attr_accessor :upgrade_headers
 
     # Websocket URL
@@ -327,8 +327,8 @@ module MQTT
       end
     end
 
-    # Handle a Websocket udgrade from TCP
-    # this deals with the initial handshake and then returns for MQTT
+    # Handle a Websocket upgrade from standard TCP socket
+    # this deals with the initial HTTP Upgrade and then returns for MQTT to connack
     def websocket_upgrade
       # Create the handshake client
       puts "DEBUG - Beginning handshake"
