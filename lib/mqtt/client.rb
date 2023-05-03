@@ -63,10 +63,11 @@ module MQTT
     attr_accessor :websocket
 
     # (Hash w/ key symbols) Websocket headers to customize the HTTP upgrade request
+    # headers may be required for AWS IOT MQTT, depending on how the server is set up.
     attr_accessor :upgrade_headers
 
-    # Websocket URL
-    attr_accessor :ws_url
+    # Websocket URL - In case you want to view the websocket URI 
+    attr_reader :ws_url
 
     # Timeout between select polls (in seconds)
     SELECT_TIMEOUT = 0.5

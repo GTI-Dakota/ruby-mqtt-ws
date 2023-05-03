@@ -26,13 +26,15 @@ Gem::Specification.new do |gem|
     gem.add_development_dependency 'yard',     '>= 0.9.11'
     gem.add_development_dependency 'rspec',    '>= 3.5.0'
     gem.add_development_dependency 'simplecov','>= 0.9.2'
-    gem.add_development_dependency 'rubocop',  '~> 1.45'
+    gem.add_development_dependency 'websocket','>= 1.2.9'
+    gem.add_development_dependency 'rubocop',  '~> 1.45' 
   elsif Gem.ruby_version > Gem::Version.new('2.0')
     gem.add_development_dependency 'bundler',  '>= 1.11.2'
     gem.add_development_dependency 'rake',     '>= 10.2.2'
     gem.add_development_dependency 'yard',     '>= 0.9.11'
     gem.add_development_dependency 'rspec',    '>= 3.5.0'
     gem.add_development_dependency 'simplecov','>= 0.9.2'
+    gem.add_development_dependency 'websocket','>= 1.2.9'
     gem.add_development_dependency 'rubocop',  '~> 0.48.0'
   else
     raise "#{Gem.ruby_version} is an unsupported version of ruby"
